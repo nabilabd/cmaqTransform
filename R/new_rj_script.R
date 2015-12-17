@@ -129,21 +129,6 @@ once2 <- once %>%
   gather(Source, Rj_vals, -Date) %>% 
   mutate(Date = as.character(Date), Source = as.character(Source))
 
-
-
-# once2 <- once %>% 
-#   as.data.frame(stringsAsFactors=FALSE) %>% 
-#   mutate(Source=names07) %>%  # replace "sources" with some ".sources"
-#   Filter(function(date_rj) !anyNA(date_rj), .) %>% 
-#   gather(Date, Rj_vals, -Source) %>% 
-#   mutate(Date = as.character(Date))
-
-# once %>% 
-#   as.data.frame(stringsAsFactors=FALSE) %>% 
-#   mutate(Source=sources) %>% 
-#   gather(Date, Rj_val, -Source) %>% 
-#   filter(is.na(Rj_val))
-
 # it works! so proceed to all others
 rm(comdates, comsites, once, once2) # de-clutter
 
@@ -154,12 +139,6 @@ system.time(
   all_groups <- mcMap(function(a, b) mcMap(myfunc, a, b), concen_agg2, new_out2)
 )
 
-
-# replaced with an easier-to-clean version above
-# system.time(
-#   nall_ress <- mcmapply(function(a, b) mcmapply(get_optim, a, b), 
-#                         concen_agg2, new_out2)
-# )
 
 # with how the get_optim function currently implemented, no longer any need
 # to re-process any sitedays, or handle errors in among numerical values
@@ -174,156 +153,15 @@ all_groups2 <- all_groups %>%
   mutate(Rj_vals = as.numeric(Rj_vals)) %>% 
   filter(!is.na(Rj_vals))
 
-
-# nall_ress2 <- nall_ress %>% 
-#   llply(function(mat) as.data.frame(mat, stringsAsFactors=FALSE)) %>% 
-#   llply(function(rj_df) mutate(rj_df, Source=sources)) %>% 
-#   # llply(function(df) Filter(function(date_rj) !anyNA(date_rj), df)) %>% # this was from before
-#   llply(function(df) gather(df, Date, Rj_vals, -Source)) %>% 
-#   ldply(.id="SiteID") %>% 
-#   mutate(Date = as.character(Date), SiteID = as.character(SiteID)) %>% 
-#   filter(!is.na(Rj_vals)) %>% tbl_df
-
-# the following no longer needed: 
-
-# # check that no more NA's:
-# nall_ress2 %>% 
-#   mutate(Rj_vals = as.numeric(Rj_vals)) %>% filter(!is.na(Rj_vals)) %>% glimpse
-# 
-# # that is enough to remove the errors:
-# nall_ress2 %>% 
-#   mutate(Rj_vals = as.numeric(Rj_vals)) %>% filter(!is.na(Rj_vals)) %>% 
-#   is.na %>% sum
-# 
-# # so
-# nall_ress2 <- nall_ress2 %>% 
-#   mutate(Rj_vals = as.numeric(Rj_vals)) %>% filter(!is.na(Rj_vals))
-
-
 # 
 write_rds(all_groups2, "../../gpfs:pace1:/data_2005/Other_data/year_rj_vals.rds")
 
-# # much more stability, qualitatively, than before
-# saveRDS(nall_ress2, "data/nall_results2.rds")
-
-# # these two were calculated with the newer get_optim, that uses both optimizations
-# saveRDS(nall_ress2, "../../gpfs:pace1:/data_2006/Other_data/get_optim2_nall_results2.rds") # for 2006, with newer get_optim
-# saveRDS(nall_ress2, "../../gpfs:pace1:/data_2005/Other_data/nall_results2.rds") # for 2005. TODO: generalize
-
-
-####### -----
-# comparing newer get_optim method
-
-orig_nall2 <- readRDS("data/nall_results2.rds") %>% tbl_df %>% 
-  rename(orig_rj = Rj_vals)
-
-# NO DIFFERENCE IN ALL VALUES OF ORIGINAL OUTPUT OF GET_OPTIM
-nall_ress2 %>% 
-  left_join(orig_nall2) %>% 
-  mutate(diff_method = round(Rj_vals - orig_rj, 10)) %>% 
-  filter(diff_method != 0)
-
-# 2060 (or 1000?) values in newer output of get_optim
-nall_ress2 %>% 
-  anti_join(orig_nall2)
 
 ##########################################################################
 # part (2) of new_rj_script: find errors and re-optimize those site-days
 ##########################################################################
 
-# DEFUNCT/OBSOLETE
-
-#' Identify sites and dates with nloptr not converging
-#' 
-#' Want to find way to automate detection of sites, dates where errors occurred.
-#' 
-#' The key idea here is that if there's an error, then the result for a site 
-#' would be a list, not a matrix.
-#' 
-#' @param dflist list of dataframes, which is the result of the optimization.
-#' @return a dataframe, with columns \code{SiteID} and \code{Date}
-#' 
-find_error_sitedates <- function(dflist) {
-  
-  res <- dflist %>% ldply(class, .id = "SiteID") %>% filter(V1 == "list")
-  if(nrow(res) == 0) return 
-  
-  # from here, we presume there are some sites with errors
-  sites <- as.character(res$SiteID)
-  site_inds <- which(names(dflist) == sites)
-  error_sites <- dflist[site_inds]
-  
-  # produce, for each site, a list of dates for which optimization fails
-  # then convert results to a dataframe
-  errors <- llply(error_sites, find_errors) %>% llply(which)
-  errors %>% 
-    unlist %>% names %>% str_split(fixed("."), n = 2) %>% 
-    ldply %>% set_names(c("SiteID", "Date"))
-}
-
-
-# re-do optimization for sites-days for which there were problems
-
-err_sitedays <- find_error_sitedates(nall_ress)
-
-concen_agg3 <- concen_agg2 %>% from_sitedatelist %>% 
-  right_join(err_sitedays) %>% to_sitedatelist
-new_out3 <- new_out2 %>% from_sitedatelist %>% 
-  right_join(err_sitedays) %>% to_sitedatelist
-
-# re-compute Rj value for sites, dates where it failed before
-system.time(
-  redo_rjs <- mcmapply(function(a, b) mcmapply(get_optim, a, b), 
-                        concen_agg3, new_out3)
-)
-
-err_sitedays
-
-
-succeeded <- vapply(redo_rjs, is.numeric, logical(1))
-if( any (succeeded)) ldply(redo_rjs, `[`, succeeded, .id = "SiteID")
-redo_rjs %>% ldply(.id = "SiteID") %>% glimpse
-
-res <- data.frame(
-  SiteID = as.character(err_sitedays$SiteID), 
-  Source = sources,
-  Date = rep(err_sitedays$Date, each = 20), 
-  Rj_vals = unname(redo_rjs)
-)
-
-res %>% filter(!is.na(Rj_vals)) %>% glimpse
-
-year_rj <- rbind(nall_ress2, res) %>% filter(!is.na(Rj_vals))
-year_rj %>% glimpse
-year_rj %>% is.na %>% sum
-
-saveRDS(year_rj, "data/year_rj.rds")
-
-##############################
-# hack to fix some dates, which aren't handled in the second optimization
-##############################
-
-xrows <- which(str_sub(year_rj$Date, 1, 1) == "X")
-year_rj[xrows, ] %>% glimpse
-year_rj[xrows, ] %>% mutate(Date = str_sub(Date, 2, -1)) %>% 
-  mutate(Date = as.character(ymd(Date))) %>% glimpse
-
-year_rj[xrows, ] <- year_rj[xrows, ] %>% mutate(Date = str_sub(Date, 2, -1)) %>% 
-  mutate(Date = as.character(ymd(Date)))
-
-year_rj[xrows, ] %>% glimpse
-res %>% glimpse
-
-# and no overlap:
-year_rj[xrows, ] %>% inner_join(res)
-
-saveRDS(year_rj, "data/year_rj.rds")
-
-# year_rj3 had Rj_vals of NA filtered out, and year_rj4 just had a second 
-# optimization performed where there were errors before. The previous year_rj4, 
-# then is equivalent to year_rj here.
-
-####### THIS IS WHERE PROCESSING CAN CONTINUE FROM, AFTER NALL_RESS2
+####### THIS IS WHERE PROCESSING CAN CONTINUE FROM
 
 year_rj <- all_groups2 # for 2007, 2005
 
@@ -483,69 +321,6 @@ system.time({
 write_rds(all_rj2005, "../../gpfs:pace1:/data_2005/Other_data/rj_st_interp2005.rds")
 
 ################################################
-
-
-
-
-
-
-
-
-so_data <- year_thirds %>% 
-  filter(Source == "BIOG") %>% 
-  dlply(.(Date)) %>% 
-  extract2(45)  # 36, 42: fixed, 43: not fixed
-
-# long-term solution: find which csn sites are too close to prediction locations
-# to have kriging performed. Then if there is a singularity, remove that 
-# close location from the set of observations
-
-
-locs <- spDists( 
-  as.matrix(as.data.frame(so_data)[, c("LON", "LAT")]), 
-  as.matrix(as.data.frame(xxx)[, c("LON", "LAT")]),
-  longlat = TRUE
-  )
-
-# remove five rows closest to points in spatial grid
-close_rows <- (order(locs) %% nrow(locs))[1:4]
-
-so_data %>% 
-  # extract(-close_rows, ) %>% 
-  make_spdf %>% 
-  ext_autoKrige(Rj_vals ~ 1, ., new_dat = xxx, model="Exp") %>% 
-  str
-
-# here, no singularity if the four closest are removed, but there is if the 
-# fourth closest is included. Here are the closest (euclidean) distances between 
-# training and prediction locations:
-locs[order(locs)][1:5]
-
-# generalizing, let's find the sites that are closest to the prediction 
-# locations
-
-csn_dists <- spDists( 
-  as.matrix(csn_site_index[, c("LON", "LAT")]), 
-  as.matrix(as.data.frame(xxx)[, c("LON", "LAT")]),
-  longlat = TRUE
-)
-
-# diagnostics
-csn_dists %>% str # 188 rows
-csn_dists[ order(csn_dists) ][1:10] # 10 closest distances
-close_csn <- ( order(csn_dists) %% nrow(csn_site_index) )[1:6] 
-
-close_ids <- csn_site_index[c(close_csn, 188), "SiteID"]
-
-# tidy up
-rm(locs, csn_dists, close_ids, close_csn, close_rows, setL)
-
-# this works, and is generalizable
-so_data %>% 
-  filter(!(SiteID %in% close_ids)) %>% 
-  make_spdf %>% 
-  autoKrige(Rj_vals ~ 1, ., new_data = xxx, model="Exp") %>% 
-  str
 
 
 # still not able to krige all of them. 
