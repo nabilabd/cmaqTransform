@@ -20,14 +20,6 @@ num_sources <- ifelse(yr < 2007, yes = 20, no = 16)
 # (a) matlab files are converted to rds files:
 convert_mat_files(mat_path, "2005")
 
-## renaming
-# folder containing rds files
-for(fname in dir("rds_files_2007/", full=T)) {
-  cc <- readRDS(fname); 
-  cc2 <- cc %>% rename_rds_files(yr = "2007"); 
-  rm(cc)
-  saveRDS(cc2, fname)
-}
 
 # (b) rds files are broken down into 10-day intervals (~ 63 min)
 gen_interval_rds("../../gpfs:pace1:/data_2007/rds_files_2007/", drop_last = 11)
@@ -119,7 +111,6 @@ myfunc <- function(x, y) get_optim2(x, y, yr = yr, .sources = .sources)
 
 system.time(
   once <- Map(myfunc, concen_agg2[[ind1]], new_out2[[ind1]]) # TOO MUCH INDEXING !?!
-  # once <- Map(get_optim2, concen_agg2[[ind1]], new_out2[[ind1]], yr = "2006") # WORKS !?
 )
 
 # version for using "Map" in the optimization
